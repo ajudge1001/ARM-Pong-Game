@@ -1,0 +1,680 @@
+   1              	# 0 "./src/game.s"
+   2              	# 1 "/Users/alexj/Documents/College/CSU11021/2590-game//"
+   1              	...
+   0              	
+   0              	
+   1              	# PASTE LINK TO TEAM VIDEO BELOW
+   2              	#
+   3              	#
+   4              	
+   5              	  .syntax unified
+   6              	  .cpu cortex-m4
+   7              	  .fpu softvfp
+   8              	  .thumb
+   9              	  
+  10              	  .global Main
+  11              	  .global  SysTick_Handler
+  12              	  .global EXTI0_IRQHandler
+  13              	
+  14              	  @ Definitions are in definitions.s to keep this file "clean"
+  15              	  .include "./src/definitions.s"
+   1              	  .equ    GPIOE_BASE, 0x48001000
+   2              	  .equ    GPIOE_MODER, (GPIOE_BASE + 0x00)
+   3              	  .equ    GPIOE_OTYPER, (GPIOE_BASE + 0x04)
+   4              	  .equ    GPIOE_OSPEEDR, (GPIOE_BASE + 0x08)
+   5              	  .equ    GPIOE_PUPDR, (GPIOE_BASE + 0x0C)
+   6              	  .equ    GPIOE_IDR, (GPIOE_BASE + 0x10)
+   7              	  .equ    GPIOE_ODR, (GPIOE_BASE + 0x14)
+   8              	  .equ    GPIOE_BSRR, (GPIOE_BASE + 0x18)
+   9              	  .equ    GPIOE_LCKR, (GPIOE_BASE + 0x1C)
+  10              	  .equ    GPIOE_AFRL, (GPIOE_BASE + 0x20)
+  11              	  .equ    GPIOE_AFRH, (GPIOE_BASE + 0x24)
+  12              	
+  13              	  .equ    RCC_BASE, 0x40021000
+  14              	  .equ    RCC_AHBENR, (RCC_BASE + 0x14)
+  15              	  .equ    RCC_AHBENR_GPIOEEN_BIT, 21
+  16              	
+  17              	  .equ    SYSTICK_BASE, 0xE000E010
+  18              	  .equ    SYSTICK_CSR, (SYSTICK_BASE + 0x00)
+  19              	  .equ    SYSTICK_LOAD, (SYSTICK_BASE + 0x04)
+  20              	  .equ    SYSTICK_VAL, (SYSTICK_BASE + 0x08)
+  21              	
+  22              	  .equ    SYSCFG_BASE, (0x40010000)
+  23              	  .equ    SYSCFG_EXTIICR1, (SYSCFG_BASE + 0x08)
+  24              	
+  25              	  .equ    NVIC_ISER, 0xE000E100
+  26              	
+  27              	  .equ    EXTI_BASE, 0x40010400
+  28              	  .equ    EXTI_IMR, (EXTI_BASE + 0x00)
+  29              	  .equ    EXTI_RTSR, (EXTI_BASE + 0x08)
+  30              	  .equ    EXTI_FTSR, (EXTI_BASE + 0x0C)
+  31              	  .equ    EXTI_PR, (EXTI_BASE + 0x14)
+  32              	
+  33              	  .equ    LD3_PIN, 9
+  34              	  .equ    LD4_PIN, 8
+  35              	  .equ    LD5_PIN, 10
+  36              	  .equ    LD6_PIN, 15
+  37              	  .equ    LD7_PIN, 11
+  38              	  .equ    LD8_PIN, 14
+  39              	  .equ    LD9_PIN, 12
+  40              	  .equ    LD10_PIN, 13
+  41              	  
+  42              	  .equ    SCB_BASE, 0xE000ED00
+  43              	  .equ    SCB_ICSR, (SCB_BASE + 0x04)
+  44              	  .equ    SCB_ICSR_PENDSTCLR, (1<<25)
+  16              	
+  17              	  @.equ    BLINK_PERIOD, 300
+  18              	
+  19              	  .section .text
+  20              	
+  21              	Main:
+  22 0000 70B5     	  PUSH  {R4-R6,LR}
+  23              	
+  24              	
+  25              	  @
+  26              	  @ Prepare GPIO Port E Pin 9 for output (LED LD3)
+  27              	  @ We'll blink LED LD3 (the orange LED)
+  28              	  @
+  29              	
+  30              	  @ Enable GPIO port E by enabling its clock
+  31 0002 C04C     	  LDR     R4, =RCC_AHBENR
+  32 0004 2568     	  LDR     R5, [R4]
+  33 0006 85F40015 	  EOR     R5, R5, #(0b1 << (RCC_AHBENR_GPIOEEN_BIT))
+  34 000a 2560     	  STR     R5, [R4]
+  35              	
+  36              	  @ Configure LD6-10 for output
+  37              	  @   by setting bits 27:26 of GPIOE_MODER to 01 (GPIO Port E Mode Register)
+  38              	  @   (by BIClearing then ORRing)
+  39 000c BE4C     	  LDR     R4, =GPIOE_MODER
+  40 000e 2568     	  LDR     R5, [R4]                    @ Read ...
+  41 0010 25F44035 	BIC     R5, #(0b11<<(LD4_PIN*2))      @ Modify ...
+  42 0014 45F48035 	ORR     R5, #(0b01<<(LD4_PIN*2))      @ write 01 to bits
+  43 0018 25F44015 	BIC     R5, #(0b11<<(LD5_PIN*2))      @ Modify ...
+  44 001c 45F48015 	ORR     R5, #(0b01<<(LD5_PIN*2))      @ write 01 to bits
+  45 0020 25F04045 	 BIC     R5, #(0b11<<(LD6_PIN*2))  @ Modify ...
+  46 0024 45F08045 	  ORR     R5, #(0b01<<(LD6_PIN*2))  @ write 01 to bits 
+  47 0028 25F44005 	  BIC     R5, #(0b11<<(LD7_PIN*2))  @ Modify ...
+  48 002c 45F48005 	  ORR     R5, #(0b01<<(LD7_PIN*2))  @ write 01 to bits 
+  49 0030 25F04055 	  BIC     R5, #(0b11<<(LD8_PIN*2))  @ Modify ...
+  50 0034 45F08055 	  ORR     R5, #(0b01<<(LD8_PIN*2))  @ write 01 to bits 
+  51 0038 25F04075 	  BIC     R5, #(0b11<<(LD9_PIN*2))  @ Modify ...
+  52 003c 45F08075 	  ORR     R5, #(0b01<<(LD9_PIN*2))  @ write 01 to bits 
+  53 0040 25F04065 	  BIC     R5, #(0b11<<(LD10_PIN*2))  @ Modify ...
+  54 0044 45F08065 	  ORR     R5, #(0b01<<(LD10_PIN*2))  @ write 01 to bits 
+  55 0048 2560     	  STR     R5, [R4]                    @ Write 
+  56              	
+  57              	
+  58              	
+  59              	
+  60              	  @ Configure SysTick Timer to generate an interrupt every 1ms
+  61              	
+  62 004a B04C     	  LDR     R4, =SCB_ICSR               @ Clear any pre-existing interrupts
+  63 004c 4FF00075 	  LDR     R5, =SCB_ICSR_PENDSTCLR     @
+  64 0050 2560     	  STR     R5, [R4]                    @
+  65              	
+  66 0052 AF4C     	  LDR     R4, =SYSTICK_CSR            @ Stop SysTick timer
+  67 0054 4FF00005 	  LDR     R5, =0                      @   by writing 0 to CSR
+  68 0058 2560     	  STR     R5, [R4]                    @   CSR is the Control and Status Register
+  69              	  
+  70 005a AE4C     	  LDR     R4, =SYSTICK_LOAD           @ Set SysTick LOAD for 1ms delay
+  71 005c 41F63F75 	  LDR     R5, =7999                   @ Assuming 8MHz clock
+  72 0060 2560     	  STR     R5, [R4]                    @ 
+  73              	
+  74 0062 AD4C     	  LDR     R4, =SYSTICK_VAL            @   Reset SysTick internal counter to 0
+  75 0064 4FF00105 	  LDR     R5, =0x1                    @     by writing any value
+  76 0068 2560     	  STR     R5, [R4]
+  77              	
+  78 006a A94C     	  LDR     R4, =SYSTICK_CSR            @   Start SysTick timer by setting CSR to 0x7
+  79 006c 4FF00705 	  LDR     R5, =0x7                    @     set CLKSOURCE (bit 2) to system clock (1)
+  80 0070 2560     	  STR     R5, [R4]                    @     set TICKINT (bit 1) to 1 to enable interrupts
+  81              	                                      @     set ENABLE (bit 0) to 1
+  82              	
+  83              	
+  84              	  @
+  85              	  @ Prepare external interrupt Line 0 (USER pushbutton)
+  86              	  @ We'll count the number of times the button is pressed
+  87              	  @
+  88              	
+  89              	  @ 
+  90              	
+  91              	  @ Configure USER pushbutton (GPIO Port A Pin 0 on STM32F3 Discovery
+  92              	  @   kit) to use the EXTI0 external interrupt signal
+  93              	  @ Determined by bits 3..0 of the External Interrrupt Control
+  94              	  @   Register (EXTIICR)
+  95 0072 AA4C     	  LDR     R4, =SYSCFG_EXTIICR1
+  96 0074 2568     	  LDR     R5, [R4]
+  97 0076 25F00F05 	  BIC     R5, R5, #0b1111
+  98 007a 2560     	  STR     R5, [R4]
+  99              	
+ 100              	  @ Enable (unmask) interrupts on external interrupt Line0
+ 101 007c A84C     	  LDR     R4, =EXTI_IMR
+ 102 007e 2568     	  LDR     R5, [R4]
+ 103 0080 45F00105 	  ORR     R5, R5, #1
+ 104 0084 2560     	  STR     R5, [R4]
+ 105              	
+ 106              	  @ Set falling edge detection on Line0
+ 107 0086 A74C     	  LDR     R4, =EXTI_FTSR
+ 108 0088 2568     	  LDR     R5, [R4]
+ 109 008a 45F00105 	  ORR     R5, R5, #1
+ 110 008e 2560     	  STR     R5, [R4]
+ 111              	
+ 112              	  @ Enable NVIC interrupt #6 (external interrupt Line0)
+ 113 0090 A54C     	  LDR     R4, =NVIC_ISER
+ 114 0092 4FF04005 	  MOV     R5, #(1<<6)
+ 115 0096 2560     	  STR     R5, [R4]
+ 116              	
+ 117              	
+ 118              	
+ 119              	
+ 120              	  @ Initializing Global/ shared variables 
+ 121 0098 A44C     	  LDR   R4, =BLINK_PERIOD             @ count = 0;
+ 122 009a 4FF49675 	  MOV   R5, 300                       @
+ 123 009e 2560     	  STR   R5, [R4]                      @
+ 124              	
+ 125              	 
+ 126              	
+ 127 00a0 A34C     	  LDR     R4, =blink_countdown
+ 128 00a2 A24D     	  LDR     R5, =BLINK_PERIOD
+ 129 00a4 2E68     	  LDR   R6, [R5]
+ 130 00a6 2660     	  STR     R6, [R4]  
+ 131              	
+ 132              	
+ 133 00a8 A24C     	  LDR   R4, =button_count             @ count = 0;
+ 134 00aa 4FF00005 	  MOV   R5, #0                        @
+ 135 00ae 2560     	  STR   R5, [R4]                      @
+ 136              	
+ 137 00b0 A14C     	  LDR   R4, =lose_flash_count
+ 138 00b2 4FF00005 	  MOV   R5, #0
+ 139 00b6 2560     	  STR   R5, [R4]
+ 140              	
+ 141 00b8 A04C     	  LDR R4, =clear_mask
+ 142 00ba 4FF00005 	  MOV R5, #0b00000000
+ 143 00be 2560     	  STR R5, [R4]
+ 144              	
+ 145              	 @ Mask for first LED
+ 146 00c0 9F4C     	  LDR R4, =count_mask
+ 147 00c2 4FF01005 	  MOV R5, #0b00010000               @ Mask for first LED
+ 148 00c6 2560     	  STR R5, [R4]
+ 149              	
+ 150 00c8 9E4C     	  LDR R4, =ball_direction  @ 1 = right to left, -1 = left to right 
+ 151 00ca 4FF00105 	  MOV R5, #1
+ 152 00ce 2560     	  STR R5, [R4]
+ 153              	
+ 154              	
+ 155 00d0 9D4C     	  LDR R4, =grace_period
+ 156 00d2 4FF42F75 	  MOV R5, 700
+ 157 00d6 2560     	  STR R5, [R4]
+ 158              	
+ 159 00d8 9C4C     	  LDR R4, =game_state @ 1 = came from main, 2 = came from iput 3 = LOSE STATE
+ 160 00da 4FF00105 	  MOV R5, #1
+ 161 00de 2560     	  STR R5, [R4]
+ 162              	
+ 163 00e0 9B4C     	  LDR R4, =rally_number
+ 164 00e2 4FF00005 	  MOV R5, #0
+ 165 00e6 2560     	  STR R5, [R4]
+ 166              	
+ 167              	  @ Nothing else to do in Main
+ 168              	  @ Idle loop forever (welcome to interrupts!!)
+ 169              	  @LDR     R4, =SCB_ICSR               @ Clear any pre-existing interrupts
+ 170              	  @LDR     R5, =SCB_ICSR_PENDSTCLR     @
+ 171              	  @STR     R5, [R4]                    @
+ 172              	
+ 173              	mainLoop:
+ 174              	
+ 175 00e8 FEE7     	  B     mainLoop
+ 176              	  
+ 177              	End_Main:
+ 178 00ea 70BD     	  POP   {R4-R6,PC}
+ 179              	
+ 180              	
+ 181              	
+ 182              	@
+ 183              	@ SysTick interrupt handler (blink LED LD3)
+ 184              	@
+ 186              	SysTick_Handler:
+ 187              	
+ 188 00ec 70B5     	  PUSH  {R4-R6, LR}
+ 189              	
+ 190 00ee 974C     	  LDR   R4, =game_state
+ 191 00f0 2568     	  LDR   R5, [R4]
+ 192 00f2 032D     	  CMP   R5, #3
+ 193 00f4 13D0     	  BEQ   .LloseState
+ 194              	
+ 195 00f6 954C     	  LDR   R4, =game_state
+ 196 00f8 2568     	  LDR   R5, [R4]
+ 197 00fa 012D     	  CMP   R5, #1
+ 198 00fc 07D1     	  BNE   .LgracePeriod
+ 199              	  
+ 200              	
+ 201 00fe 8C4C     	  LDR   R4, =blink_countdown        @ if (countdown != 0) {
+ 202 0100 2568     	  LDR   R5, [R4]                    @
+ 203 0102 002D     	  CMP   R5, #0                      @
+ 204 0104 7DD0     	  BEQ   .LelseFire                  @
+ 205              	
+ 206 0106 A5F10105 	  SUB   R5, R5, #1                  @   countdown = countdown - 1;
+ 207 010a 2560     	  STR   R5, [R4]                    @
+ 208              	
+ 209 010c B4E0     	  B     .LendIfDelay                @ }
+ 210              	.LgracePeriod:
+ 211 010e 8E4C     	  LDR R4, =grace_period
+ 212 0110 2568     	  LDR R5, [R4]
+ 213 0112 002D     	  CMP R5, #0
+ 214 0114 71D1     	  BNE .LcountdownSub
+ 215              	
+ 216              	
+ 217 0116 8D4C     	  LDR   R4, =game_state
+ 218 0118 4FF00305 	  MOV   R5, #3
+ 219 011c 2560     	  STR   R5, [R4] 
+ 220              	
+ 221              	  @LDR   R4, =BLINK_PERIOD             @ count = 0;
+ 222              	 @ MOV   R5, 300                       @
+ 223              	  @STR   R5, [R4]                      @
+ 224              	
+ 225              	.LloseState:
+ 226              	 
+ 227 011e 864C     	LDR      R4, =lose_flash_count
+ 228 0120 2568     	LDR      R5, [R4]
+ 229 0122 032D     	CMP     R5, #3
+ 230 0124 44D0     	BEQ     .Lreset
+ 231 0126 874C     	LDR     R4, =ball_direction           @ 1 = right to left, -1 = left to right
+ 232 0128 2568     	LDR     R5, [R4]
+ 233 012a 012D     	CMP     R5, #1                       @ direction clockwise
+ 234 012c 05D0     	BEQ     .LLoseFlashLeft
+ 235              	
+ 236 012e 894C     	 LDR     R4, =GPIOE_ODR            @   Invert LD4
+ 237 0130 2568     	 LDR     R5, [R4]                  @
+ 238 0132 85F48075 	 EOR     R5, #(0b1<<(LD4_PIN))     @   GPIOE_ODR = GPIOE_ODR ^ (1<<LD4_PIN);
+ 239 0136 2560     	 STR     R5, [R4]
+ 240 0138 04E0     	 B       .LLoseFlash    
+ 241              	
+ 242              	.LLoseFlashLeft:                      @ direction counterclockwise
+ 243 013a 864C     	 LDR     R4, =GPIOE_ODR            @   Invert LD5
+ 244 013c 2568     	 LDR     R5, [R4]                  @
+ 245 013e 85F48065 	 EOR     R5, #(0b1<<(LD5_PIN))     @   GPIOE_ODR = GPIOE_ODR ^ (1<<LD5_PIN);
+ 246 0142 2560     	 STR     R5, [R4] 
+ 247              	
+ 248              	.LLoseFlash:
+ 249 0144 7A4C     	 LDR   R4, =blink_countdown        @ if (countdown != 0) {
+ 250 0146 2568     	 LDR   R5, [R4]                    @
+ 251 0148 002D     	 CMP   R5, #0                      @
+ 252 014a 03D0     	 BEQ   .LLoseFire
+ 253 014c A5F10105 	 SUB   R5, R5, #1                  @   countdown = countdown - 1;
+ 254 0150 2560     	 STR   R5, [R4] 
+ 255 0152 91E0     	 B .LendIfDelay
+ 256              	
+ 257              	.LLoseFire:
+ 258 0154 7F4C     	 LDR     R4, =GPIOE_ODR            @   Invert all LEDs
+ 259 0156 2568     	 LDR     R5, [R4]                  @
+ 260 0158 85F40075 	 EOR     R5, #(0b1<<(LD3_PIN))     @   GPIOE_ODR = GPIOE_ODR ^ (1<<LD3_PIN);
+ 261 015c 2560     	 STR     R5, [R4]      
+ 262 015e 7D4C     	 LDR     R4, =GPIOE_ODR            @  
+ 263 0160 2568     	 LDR     R5, [R4]                  @
+ 264 0162 85F48075 	 EOR     R5, #(0b1<<(LD4_PIN))     @   GPIOE_ODR = GPIOE_ODR ^ (1<<LD4_PIN);
+ 265 0166 2560     	 STR     R5, [R4]     
+ 266 0168 7A4C     	 LDR     R4, =GPIOE_ODR            @ 
+ 267 016a 2568     	 LDR     R5, [R4]                  @
+ 268 016c 85F48065 	 EOR     R5, #(0b1<<(LD5_PIN))     @   GPIOE_ODR = GPIOE_ODR ^ (1<<LD5_PIN);
+ 269 0170 2560     	 STR     R5, [R4]     
+ 270 0172 784C     	 LDR     R4, =GPIOE_ODR            @ 
+ 271 0174 2568     	 LDR     R5, [R4]                  @
+ 272 0176 85F40045 	 EOR     R5, #(0b1<<(LD6_PIN))     @   GPIOE_ODR = GPIOE_ODR ^ (1<<LD6_PIN);
+ 273 017a 2560     	 STR     R5, [R4]     
+ 274 017c 754C     	 LDR     R4, =GPIOE_ODR            @ 
+ 275 017e 2568     	 LDR     R5, [R4]                  @
+ 276 0180 85F40065 	 EOR     R5, #(0b1<<(LD7_PIN))     @   GPIOE_ODR = GPIOE_ODR ^ (1<<LD7_PIN);
+ 277 0184 2560     	 STR     R5, [R4]     
+ 278 0186 734C     	 LDR     R4, =GPIOE_ODR            @ 
+ 279 0188 2568     	 LDR     R5, [R4]                  @
+ 280 018a 85F48045 	 EOR     R5, #(0b1<<(LD8_PIN))     @   GPIOE_ODR = GPIOE_ODR ^ (1<<LD8_PIN);
+ 281 018e 2560     	 STR     R5, [R4]     
+ 282 0190 704C     	 LDR     R4, =GPIOE_ODR            @ 
+ 283 0192 2568     	 LDR     R5, [R4]                  @
+ 284 0194 85F48055 	 EOR     R5, #(0b1<<(LD9_PIN))     @   GPIOE_ODR = GPIOE_ODR ^ (1<<LD9_PIN);
+ 285 0198 2560     	 STR     R5, [R4]     
+ 286 019a 6E4C     	 LDR     R4, =GPIOE_ODR            @  
+ 287 019c 2568     	 LDR     R5, [R4]                  @
+ 288 019e 85F40055 	 EOR     R5, #(0b1<<(LD10_PIN))     @   GPIOE_ODR = GPIOE_ODR ^ (1<<LD10_PIN);
+ 289 01a2 2560     	 STR     R5, [R4]  
+ 290              	  
+ 291 01a4 644C     	LDR     R4, =lose_flash_count     @ increment lose flash count
+ 292 01a6 2568     	 LDR     R5, [R4]
+ 293 01a8 05F10105 	 ADD     R5, R5, #1
+ 294 01ac 2560     	 STR     R5, [R4]
+ 295              	
+ 296 01ae 5FE0     	 B .LendBlink
+ 297              	
+ 298              	.Lreset:
+ 299              	
+ 300 01b0 5E4C     	  LDR   R4, =BLINK_PERIOD             @ count = 0;
+ 301 01b2 4FF49675 	  MOV   R5, 300                       @
+ 302 01b6 2560     	  STR   R5, [R4]                      @
+ 303              	
+ 304              	
+ 305 01b8 5D4C     	  LDR     R4, =blink_countdown
+ 306 01ba 5C4D     	  LDR     R5, =BLINK_PERIOD
+ 307 01bc 2E68     	  LDR   R6, [R5]
+ 308 01be 2660     	  STR     R6, [R4]  
+ 309              	
+ 310              	
+ 311 01c0 5C4C     	  LDR   R4, =button_count             @ count = 0;
+ 312 01c2 4FF00005 	  MOV   R5, #0                        @
+ 313 01c6 2560     	  STR   R5, [R4]                      @
+ 314              	
+ 315 01c8 5B4C     	  LDR   R4, =lose_flash_count
+ 316 01ca 4FF00005 	  MOV   R5, #0
+ 317 01ce 2560     	  STR   R5, [R4]
+ 318              	
+ 319 01d0 5D4C     	  LDR R4, =grace_period
+ 320 01d2 4FF42F75 	  MOV R5, 700
+ 321 01d6 2560     	  STR R5, [R4]
+ 322              	  
+ 323 01d8 594C     	  LDR R4, =count_mask
+ 324 01da 4FF01005 	  MOV R5, #0b00010000               @ Mask for first LED
+ 325 01de 2560     	  STR R5, [R4]
+ 326              	
+ 327 01e0 584C     	  LDR R4, =ball_direction  @ 1 = right to left, -1 = left to right 
+ 328 01e2 4FF00105 	  MOV R5, #1
+ 329 01e6 2560     	  STR R5, [R4]
+ 330              	
+ 331 01e8 584C     	  LDR R4, =game_state @ 1 = came from main, 2 = came from iput 3 = LOSE STATE
+ 332 01ea 4FF00105 	  MOV R5, #1
+ 333 01ee 2560     	  STR R5, [R4]
+ 334              	
+ 335 01f0 574C     	  LDR R4, =rally_number
+ 336 01f2 4FF00005 	  MOV R5, #0
+ 337 01f6 2560     	  STR R5, [R4]
+ 338              	
+ 339 01f8 3EE0     	  B .LendIfDelay
+ 340              	
+ 341              	
+ 342              	
+ 343              	
+ 344              	  
+ 345              	  @ LOSE CODE HERE
+ 346              	
+ 347              	.LcountdownSub:
+ 348 01fa A5F10105 	  SUB R5, R5, #1
+ 349 01fe 2560     	  STR R5, [R4]
+ 350              	
+ 351 0200 3AE0     	  B .LendIfDelay
+ 352              	  
+ 353              	
+ 354              	.LelseFire:    
+ 355              	
+ 356              	
+ 357              	
+ 358              	                     @ else {
+ 359 0202 504C     	  LDR  R4, =ball_direction
+ 360 0204 2668     	  LDR  R6, [R4]                    
+ 361 0206 012E     	  CMP R6, #1
+ 362 0208 18D1     	  BNE .LleftToRight
+ 363              	
+ 364              	
+ 365 020a 524C     	  LDR     R4, =GPIOE_ODR            @   coming from right to left
+ 366 020c 2568     	  LDR     R5, [R4]                  @
+ 367 020e 4B4C     	  LDR     R4, =clear_mask
+ 368 0210 05EA0405 	  AND     R5, R5, R4
+ 369 0214 4F4C     	  LDR     R4, =GPIOE_ODR    
+ 370 0216 2560     	  STR     R5, [R4]  
+ 371              	
+ 372              	
+ 373 0218 494C     	  LDR     R4, =count_mask
+ 374 021a 2668     	  LDR     R6, [R4]
+ 375 021c 85EAC625 	  EOR     R5, R5, R6, LSL #(LD7_PIN) 
+ 376 0220 4C4C     	  LDR     R4, =GPIOE_ODR    
+ 377 0222 2560     	  STR     R5, [R4]  
+ 378              	
+ 379              	             
+ 380              	  
+ 381 0224 012E     	  CMP     R6, #0b00000001
+ 382 0226 02D0     	  BEQ     .LelseLastLed
+ 383 0228 4FEA5606 	  MOV     R6, R6, LSR #1
+ 384 022c 1EE0     	  B       .LendIfNotLastLed
+ 385              	.LelseLastLed:
+ 386 022e 4FF01006 	  MOV     R6, #0b00010000               @ Mask for first LED  CHANGE GAME STATE HERE ONLY!!!!!
+ 387 0232 464C     	  LDR   R4, =game_state
+ 388 0234 4FF00205 	  MOV   R5, #2
+ 389 0238 2560     	  STR   R5, [R4]            @ CHANGING GAME STATE TO 2
+ 390              	
+ 391 023a 17E0     	  B .LendIfNotLastLed
+ 392              	
+ 393              	
+ 394              	.LleftToRight:
+ 395 023c 454C     	  LDR     R4, =GPIOE_ODR            @   coming from left to right
+ 396 023e 2568     	  LDR     R5, [R4]                  @
+ 397              	
+ 398 0240 3E4C     	  LDR     R4, =clear_mask
+ 399 0242 05EA0405 	  AND     R5, R5, R4
+ 400 0246 434C     	  LDR     R4, =GPIOE_ODR    
+ 401 0248 2560     	  STR     R5, [R4] 
+ 402              	
+ 403              	
+ 404 024a 3D4C     	  LDR     R4, =count_mask
+ 405 024c 2668     	  LDR     R6, [R4]
+ 406 024e 85EAC625 	  EOR     R5, R5, R6, LSL #(LD7_PIN) 
+ 407 0252 404C     	  LDR     R4, =GPIOE_ODR    
+ 408 0254 2560     	  STR     R5, [R4] 
+ 409              	
+ 410              	
+ 411              	
+ 412 0256 102E     	  CMP     R6, #0b00010000
+ 413 0258 02D0     	  BEQ     .LelseLastLedLeft
+ 414 025a 4FEA4606 	  MOV     R6, R6, LSL #1
+ 415 025e 05E0     	  B       .LendIfNotLastLed
+ 416              	.LelseLastLedLeft:
+ 417 0260 4FF00106 	  MOV     R6, #0b00000001  
+ 418 0264 394C     	  LDR   R4, =game_state
+ 419 0266 4FF00205 	  MOV   R5, #2
+ 420 026a 2560     	  STR   R5, [R4]            @ CHANGING GAME STATE TO 2
+ 421              	  
+ 422              	.LendIfNotLastLed:                @ 
+ 423 026c 344C     	  LDR     R4, =count_mask
+ 424 026e 2660     	  STR     R6, [R4]
+ 425              	
+ 426              	
+ 427              	
+ 428              	.LendBlink:
+ 429 0270 2F4C     	  LDR     R4, =blink_countdown      @   countdown = BLINK_PERIOD;
+ 430 0272 2E4D     	  LDR     R5, =BLINK_PERIOD         @
+ 431 0274 2E68     	  LDR     R6, [R5]
+ 432 0276 2660     	  STR     R6, [R4]                  @
+ 433              	
+ 434              	.LendIfDelay:                       @ }
+ 435              	
+ 436 0278 244C     	  LDR     R4, =SCB_ICSR             @ Clear (acknowledge) the interrupt
+ 437 027a 4FF00075 	  LDR     R5, =SCB_ICSR_PENDSTCLR   @
+ 438 027e 2560     	  STR     R5, [R4]                  @
+ 439              	
+ 440              	  @ Return from interrupt handler
+ 441 0280 70BD     	  POP  {R4 - R6, PC}
+ 442              	
+ 443              	
+ 444              	
+ 445              	@
+ 446              	@ External interrupt line 0 interrupt handler
+ 447              	@   (count button presses)
+ 448              	@
+ 450              	EXTI0_IRQHandler:
+ 451              	
+ 452 0282 70B5     	  PUSH  {R4-R6,LR}
+ 453              	  
+ 454 0284 314C     	  LDR   R4, =game_state
+ 455 0286 2568     	  LDR   R5, [R4]
+ 456 0288 012D     	  CMP   R5, #1
+ 457 028a 04D1     	  BNE   .LrallyHit   
+ 458              	
+ 459              	  @ LOSE CODE GOES HERE :)
+ 460              	  
+ 461              	
+ 462 028c 2F4C     	  LDR   R4, =game_state
+ 463 028e 4FF00305 	  MOV   R5, #3
+ 464 0292 2560     	  STR   R5, [R4] 
+ 465 0294 30E0     	  B .LreturnButton
+ 466              	
+ 467              	
+ 468              	
+ 469              	
+ 470              	
+ 471              	
+ 472              	.LrallyHit:
+ 473 0296 274C     	  LDR   R4, =button_count           @ count = count + 1
+ 474 0298 2568     	  LDR   R5, [R4]                    @
+ 475 029a 042D     	  CMP   R5, #4
+ 476 029c 0ED1     	  BNE   .LballCountInc
+ 477 029e 234C     	  LDR   R4, =BLINK_PERIOD
+ 478 02a0 2568     	  LDR   R5, [R4]
+ 479 02a2 A5F16405 	  SUB   R5, R5, #100
+ 480 02a6 2560     	  STR   R5, [R4]
+ 481              	
+ 482 02a8 214C     	  LDR     R4, =blink_countdown
+ 483 02aa 204D     	  LDR     R5, =BLINK_PERIOD
+ 484 02ac 2E68     	  LDR   R6, [R5]
+ 485 02ae 2660     	  STR     R6, [R4]   
+ 486              	
+ 487 02b0 204C     	  LDR   R4, =button_count           @ count = count + 1
+ 488 02b2 2568     	  LDR   R5, [R4] 
+ 489 02b4 4FF00005 	  MOV   R5, #0
+ 490 02b8 2560     	  STR   R5, [R4]
+ 491 02ba 02E0     	  B     .LchangeBallDir
+ 492              	
+ 493              	.LballCountInc:   
+ 494 02bc 05F10105 	  ADD   R5, R5, #1                  @
+ 495 02c0 2560     	  STR   R5, [R4]                    @
+ 496              	
+ 497              	
+ 498              	.LchangeBallDir:
+ 499 02c2 204C     	  LDR  R4, =ball_direction
+ 500 02c4 2668     	  LDR  R6, [R4]                    
+ 501 02c6 012E     	  CMP R6, #1
+ 502 02c8 07D0     	  BEQ .LswapLR
+ 503 02ca 4FF00106 	  MOV R6, #1
+ 504 02ce 2660     	  STR R6, [R4]     @SETTTING NEW GAME STATE
+ 505 02d0 1B4C     	  LDR R4, =count_mask
+ 506 02d2 4FF01005 	  MOV R5, #0b00010000               @ Mask for first LED
+ 507 02d6 2560     	  STR R5, [R4]
+ 508 02d8 06E0     	  B .LackButDown
+ 509              	
+ 510              	
+ 511              	
+ 512              	.LswapLR:
+ 513 02da 4FF0FF36 	  MOV R6, -1
+ 514 02de 2660     	  STR R6, [R4]     @SETTTING NEW GAME STATE
+ 515 02e0 174C     	  LDR R4, =count_mask
+ 516 02e2 4FF00105 	  MOV R5, #0b00000001               @ Mask for first LED
+ 517 02e6 2560     	  STR R5, [R4]
+ 518              	
+ 519              	  
+ 520              	.LackButDown:
+ 521              	
+ 522 02e8 174C     	  LDR R4, =grace_period
+ 523 02ea 4FF42F75 	  MOV R5, 700
+ 524 02ee 2560     	  STR R5, [R4]
+ 525              	
+ 526 02f0 164C     	  LDR   R4, =game_state
+ 527 02f2 4FF00105 	  MOV   R5, #1
+ 528 02f6 2560     	  STR   R5, [R4] 
+ 529              	
+ 530              	.LreturnButton:
+ 531 02f8 174C     	  LDR   R4, =EXTI_PR                @ Clear (acknowledge) the interrupt
+ 532 02fa 4FF00105 	  MOV   R5, #(1<<0)                 @
+ 533 02fe 2560     	  STR   R5, [R4]                    @
+ 534              	
+ 535              	  @ Return from interrupt handler
+ 536              	
+ 537              	
+ 538              	
+ 539              	
+ 540              	
+ 541 0300 70BD     	  POP  {R4-R6,PC}
+ 542              	
+ 543              	
+ 544 0302 0000     	  .section .data
+ 545              	lose_flash_count:
+ 546 0000 00000000 	  .space 4
+ 547              	BLINK_PERIOD:
+ 548 0004 00000000 	  .space 4
+ 549              	
+ 550              	clear_mask:
+ 551 0008 00000000 	  .space 4
+ 552              	
+ 553              	rally_number:
+ 554 000c 00000000 	  .space 4
+ 555              	
+ 556              	ball_direction:
+ 557 0010 00000000 	  .space 4
+ 558              	
+ 559              	grace_period:
+ 560 0014 00000000 	  .space 4
+ 561              	
+ 562              	game_state:
+ 563 0018 00000000 	  .space 4
+ 564              	
+ 565              	count_mask:
+ 566 001c 00000000 	  .space 4
+ 567              	
+ 568              	button_count:
+ 569 0020 00000000 	  .space  4
+ 570              	
+ 571              	blink_countdown:
+ 572 0024 00000000 	  .space  4
+ 573              	
+ 574              	  .end...
+DEFINED SYMBOLS
+        ./src/game.s:21     .text:0000000000000000 Main
+        ./src/game.s:186    .text:00000000000000ec SysTick_Handler
+        ./src/game.s:450    .text:0000000000000282 EXTI0_IRQHandler
+ ./src/definitions.s:1      *ABS*:0000000048001000 GPIOE_BASE
+ ./src/definitions.s:2      *ABS*:0000000048001000 GPIOE_MODER
+ ./src/definitions.s:3      *ABS*:0000000048001004 GPIOE_OTYPER
+ ./src/definitions.s:4      *ABS*:0000000048001008 GPIOE_OSPEEDR
+ ./src/definitions.s:5      *ABS*:000000004800100c GPIOE_PUPDR
+ ./src/definitions.s:6      *ABS*:0000000048001010 GPIOE_IDR
+ ./src/definitions.s:7      *ABS*:0000000048001014 GPIOE_ODR
+ ./src/definitions.s:8      *ABS*:0000000048001018 GPIOE_BSRR
+ ./src/definitions.s:9      *ABS*:000000004800101c GPIOE_LCKR
+ ./src/definitions.s:10     *ABS*:0000000048001020 GPIOE_AFRL
+ ./src/definitions.s:11     *ABS*:0000000048001024 GPIOE_AFRH
+ ./src/definitions.s:13     *ABS*:0000000040021000 RCC_BASE
+ ./src/definitions.s:14     *ABS*:0000000040021014 RCC_AHBENR
+ ./src/definitions.s:15     *ABS*:0000000000000015 RCC_AHBENR_GPIOEEN_BIT
+ ./src/definitions.s:17     *ABS*:00000000e000e010 SYSTICK_BASE
+ ./src/definitions.s:18     *ABS*:00000000e000e010 SYSTICK_CSR
+ ./src/definitions.s:19     *ABS*:00000000e000e014 SYSTICK_LOAD
+ ./src/definitions.s:20     *ABS*:00000000e000e018 SYSTICK_VAL
+ ./src/definitions.s:22     *ABS*:0000000040010000 SYSCFG_BASE
+ ./src/definitions.s:23     *ABS*:0000000040010008 SYSCFG_EXTIICR1
+ ./src/definitions.s:25     *ABS*:00000000e000e100 NVIC_ISER
+ ./src/definitions.s:27     *ABS*:0000000040010400 EXTI_BASE
+ ./src/definitions.s:28     *ABS*:0000000040010400 EXTI_IMR
+ ./src/definitions.s:29     *ABS*:0000000040010408 EXTI_RTSR
+ ./src/definitions.s:30     *ABS*:000000004001040c EXTI_FTSR
+ ./src/definitions.s:31     *ABS*:0000000040010414 EXTI_PR
+ ./src/definitions.s:33     *ABS*:0000000000000009 LD3_PIN
+ ./src/definitions.s:34     *ABS*:0000000000000008 LD4_PIN
+ ./src/definitions.s:35     *ABS*:000000000000000a LD5_PIN
+ ./src/definitions.s:36     *ABS*:000000000000000f LD6_PIN
+ ./src/definitions.s:37     *ABS*:000000000000000b LD7_PIN
+ ./src/definitions.s:38     *ABS*:000000000000000e LD8_PIN
+ ./src/definitions.s:39     *ABS*:000000000000000c LD9_PIN
+ ./src/definitions.s:40     *ABS*:000000000000000d LD10_PIN
+ ./src/definitions.s:42     *ABS*:00000000e000ed00 SCB_BASE
+ ./src/definitions.s:43     *ABS*:00000000e000ed04 SCB_ICSR
+ ./src/definitions.s:44     *ABS*:0000000002000000 SCB_ICSR_PENDSTCLR
+        ./src/game.s:22     .text:0000000000000000 $t
+        ./src/game.s:547    .data:0000000000000004 BLINK_PERIOD
+        ./src/game.s:571    .data:0000000000000024 blink_countdown
+        ./src/game.s:568    .data:0000000000000020 button_count
+        ./src/game.s:545    .data:0000000000000000 lose_flash_count
+        ./src/game.s:550    .data:0000000000000008 clear_mask
+        ./src/game.s:565    .data:000000000000001c count_mask
+        ./src/game.s:556    .data:0000000000000010 ball_direction
+        ./src/game.s:559    .data:0000000000000014 grace_period
+        ./src/game.s:562    .data:0000000000000018 game_state
+        ./src/game.s:553    .data:000000000000000c rally_number
+        ./src/game.s:173    .text:00000000000000e8 mainLoop
+        ./src/game.s:177    .text:00000000000000ea End_Main
+        ./src/game.s:546    .data:0000000000000000 $d
+        ./src/game.s:544    .text:0000000000000302 $d
+        ./src/game.s:574    .text:0000000000000304 $d
+
+NO UNDEFINED SYMBOLS
