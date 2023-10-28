@@ -10,7 +10,7 @@ Developed in ARM Assembly using Visual Studio Code and an ARM micro controller.
  
  We simulated a ball being sent back and fourth by manipulating the output bits to the small led's on top of the microcontroller. 
 
- As the player rallied the ball, the game sped up and increased the speed of the ball and lowered the buffer alloted to the player to hit the ball on time. 
+ As the player rallies the ball, the game speeds up and increases the speed of the ball and lowers the buffer alloted to the player to hit the ball on time. 
  
       
  # Group Members:
